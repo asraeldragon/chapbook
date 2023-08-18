@@ -45,6 +45,36 @@ function transitionContent(el, html, transition, duration) {
 	}
 }
 
+/* Takes two passages and merges them, preserving individual vars sections */
+const passageSplitSequence = '\n--\n';
+const mergeSources = (basePassage, passages, prepend = true) => {
+	const allVars = [];
+	const allBodies = [];
+
+	// For each split done, add the vars section if it exists, and add the body section.
+	for( const passage of [basePassage, ...passages] ) {
+		const splitPassage = passage.split(passageSplitSequence);
+
+		if( splitPassage.length === 2 ) {
+			if( prepend ) {
+				allVars.unshift(splitPassage[0]);
+				allBodies.unshift(splitPassage[1]);
+			} else {
+				allVars.push(splitPassage[0]);
+				allBodies.push(splitPassage[1]);
+			}
+		} else {
+			if( prepend ) {
+				allBodies.unshift(splitPassage[0]);
+			} else {
+				allBodies.push(splitPassage[0]);
+			}
+		}
+	}
+
+	return allVars.join('\n') + passageSplitSequence + allBodies.join('\n');
+};
+
 const updateDom = coalesceCalls(function update(calls) {
 	/*
 	Update the body content if we were ever passed a `true` argument, meaning
@@ -53,14 +83,38 @@ const updateDom = coalesceCalls(function update(calls) {
 
 	if (calls.some(c => c[0])) {
 		const trail = get('trail');
-		const passage = passageNamed(trail[trail.length - 1]);
+		const goingToPassage = trail[trail.length - 1];
+		const passage = passageNamed(goingToPassage);
 
 		if (passage) {
 			window.scrollTo(0, 0);
 
+			let source = passage.source;
+
+			// Allow JS content to run code and insert content before and after a passage
+			if( typeof window.engine.beforeRender === 'function' ) {
+				let beforeRenderContent = window.engine.beforeRender(goingToPassage);
+
+				if( typeof beforeRenderContent === 'string' ) {
+					beforeRenderContent = [beforeRenderContent];
+				}
+
+				source = mergeSources(source, beforeRenderContent);
+			}
+
+			if( typeof window.engine.afterRender === 'function' ) {
+				let afterRenderContent = window.engine.afterRender(goingToPassage);
+
+				if( typeof afterRenderContent === 'string' ) {
+					afterRenderContent = [afterRenderContent];
+				}
+
+				source = mergeSources(source, afterRenderContent, false);
+			}
+
 			transitionContent(
 				bodyContentEl,
-				render(passage.source),
+				render(source),
 				get('config.body.transition.name'),
 				get('config.body.transition.duration')
 			);
@@ -68,7 +122,7 @@ const updateDom = coalesceCalls(function update(calls) {
 			startSkipAnimation(bodyContentEl, spinnerEl);
 		} else {
 			throw new Error(
-				`There is no passage named "${trail[trail.length - 1]}".`
+				`There is no passage named "${goingToPassage}".`
 			);
 		}
 	}
